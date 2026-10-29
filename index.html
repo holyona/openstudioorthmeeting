@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>O&T TJR 手術清單智能統整工具</title>
+  <title>O&T TJR Pre-operative Meeting 手術清單統整工具</title>
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- ExcelJS & FileSaver for A4 Landscape Formatted Excel -->
@@ -29,7 +29,7 @@
             O&T TJR Pre-operative Meeting 手術清單統整工具
           </h1>
           <p class="text-sm text-slate-500 mt-1">
-            支援多張手術單智能辨識、自動排程 Sales 時間、依規提取器械與 Remarks，並匯出符合 A4 單頁列印規格之 Excel。
+            上傳多張手術室清單相片 ➜ 自動識別提取 ➜ 自動排入 Sales 時間與器械 ➜ 匯出符合 A4 單頁列印之 Excel。
           </p>
         </div>
         <div class="flex items-center gap-3">
@@ -40,21 +40,32 @@
       </div>
       
       <!-- API Key & Settings Bar -->
-      <div class="mt-4 pt-4 border-t border-slate-100 grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div class="mt-4 pt-4 border-t border-slate-100 grid grid-cols-1 md:grid-cols-4 gap-4">
         <div>
           <label class="block text-xs font-semibold text-slate-700 mb-1">
-            Gemini API Key <span class="text-red-500">*</span>
-            <a href="https://aistudio.google.com/app/apikey" target="_blank" class="text-blue-500 font-normal underline ml-1">免費取得</a>
+            連線線路 (香港選 OpenRouter)
           </label>
-          <input type="password" id="apiKeyInput" placeholder="貼上 AI Studio API Key" class="w-full text-sm px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-slate-50" />
+          <select id="providerSelect" class="w-full text-sm px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+            <option value="openrouter" selected>香港直連 (OpenRouter - 免VPN)</option>
+            <option value="gemini">Google 官方 (需開 VPN)</option>
+          </select>
         </div>
         <div>
-          <label class="block text-xs font-semibold text-slate-700 mb-1">O.T. Staff 姓名</label>
-          <input type="text" id="staffNameInput" value="Lee On Yee" placeholder="例如：Lee On Yee" class="w-full text-sm px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
+          <label class="block text-xs font-semibold text-slate-700 mb-1">
+            API Key <span class="text-red-500">*</span>
+            <span id="keyLinkArea">
+              <a href="https://openrouter.ai/keys" target="_blank" class="text-blue-500 font-normal underline ml-1">免費取得 Key</a>
+            </span>
+          </label>
+          <input type="password" id="apiKeyInput" placeholder="sk-or-v1-... 或 AIzaSy..." class="w-full text-sm px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-slate-50" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">手術室職員 (O.T. Staff)</label>
+          <input type="text" id="staffNameInput" value="Lee On Yee" class="w-full text-sm px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
         </div>
         <div>
           <label class="block text-xs font-semibold text-slate-700 mb-1">會議/製作日期</label>
-          <input type="text" id="meetingDateInput" value="" placeholder="例如：29/09/2026" class="w-full text-sm px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
+          <input type="text" id="meetingDateInput" value="29/09/2026" class="w-full text-sm px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
         </div>
       </div>
     </header>
@@ -100,7 +111,7 @@
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200 mb-4">
         <div>
           <h2 class="text-lg font-bold text-slate-900">整合預覽清單</h2>
-          <p class="text-xs text-slate-500">已自動按日期排序並加入 Sales 時間。點擊儲存格可直接手動修訂。</p>
+          <p class="text-xs text-slate-500">已自動按日期排序並加入 Sales 時間。點擊表格儲存格可直接修改文字。</p>
         </div>
         <div class="flex items-center gap-3">
           <button id="btnExportCSV" class="px-4 py-2 border border-slate-300 hover:bg-slate-50 text-slate-700 text-sm font-medium rounded-lg transition flex items-center gap-2">
@@ -137,9 +148,7 @@
               <th class="p-2">Message / Remarks</th>
             </tr>
           </thead>
-          <tbody id="tableBody" class="divide-y divide-slate-800">
-            <!-- Dynamically populated -->
-          </tbody>
+          <tbody id="tableBody" class="divide-y divide-slate-800"></tbody>
         </table>
       </div>
     </section>
@@ -147,14 +156,11 @@
   </div>
 
   <script>
-    // Initialize Icons
     lucide.createIcons();
 
-    // Default meeting date = today DD/MM/YYYY
-    const today = new Date();
-    document.getElementById('meetingDateInput').value = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth()+1).padStart(2, '0')}/${today.getFullYear()}`;
-
-    // DOM Elements
+    const providerSelect = document.getElementById('providerSelect');
+    const keyLinkArea = document.getElementById('keyLinkArea');
+    const apiKeyInput = document.getElementById('apiKeyInput');
     const dropZone = document.getElementById('dropZone');
     const fileInput = document.getElementById('fileInput');
     const previewContainer = document.getElementById('previewContainer');
@@ -167,25 +173,35 @@
     const progressPercent = document.getElementById('progressPercent');
     const resultSection = document.getElementById('resultSection');
     const tableBody = document.getElementById('tableBody');
-    const apiKeyInput = document.getElementById('apiKeyInput');
     const staffNameInput = document.getElementById('staffNameInput');
     const meetingDateInput = document.getElementById('meetingDateInput');
     const btnExportExcel = document.getElementById('btnExportExcel');
     const btnExportCSV = document.getElementById('btnExportCSV');
     const btnDemo = document.getElementById('btnDemo');
 
-    // Load saved API Key from localStorage if present
-    if (localStorage.getItem('gemini_api_key')) {
-      apiKeyInput.value = localStorage.getItem('gemini_api_key');
+    // Switch key links according to provider
+    function updateKeyLink() {
+      if (providerSelect.value === 'openrouter') {
+        keyLinkArea.innerHTML = '<a href="https://openrouter.ai/keys" target="_blank" class="text-blue-500 font-normal underline ml-1">免費取得 OpenRouter Key (香港免翻牆)</a>';
+        apiKeyInput.placeholder = '貼上 OpenRouter Key (sk-or-v1-...)';
+      } else {
+        keyLinkArea.innerHTML = '<a href="https://aistudio.google.com/app/apikey" target="_blank" class="text-blue-500 font-normal underline ml-1">免費取得 Gemini Key (需開VPN)</a>';
+        apiKeyInput.placeholder = '貼上 Google AI Studio Key (AIzaSy...)';
+      }
+    }
+    providerSelect.addEventListener('change', updateKeyLink);
+    updateKeyLink();
+
+    if (localStorage.getItem('saved_ai_key')) {
+      apiKeyInput.value = localStorage.getItem('saved_ai_key');
     }
     apiKeyInput.addEventListener('change', () => {
-      localStorage.setItem('gemini_api_key', apiKeyInput.value.trim());
+      localStorage.setItem('saved_ai_key', apiKeyInput.value.trim());
     });
 
     let uploadedFiles = [];
     let consolidatedData = [];
 
-    // Drag and Drop
     dropZone.addEventListener('click', () => fileInput.click());
     dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('border-blue-500', 'bg-blue-50'); });
     dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('border-blue-500', 'bg-blue-50'); });
@@ -263,7 +279,6 @@
       resultSection.classList.add('hidden');
     });
 
-    // Helper: Resize Image in Browser before Sending (Privacy + Fast Upload)
     async function resizeImage(file, maxDimension = 2000) {
       return new Promise((resolve) => {
         const reader = new FileReader();
@@ -295,7 +310,6 @@
       });
     }
 
-    // Convert raw date string e.g. "05/10/2026" to "5 OCT 2026 Mon"
     function formatHeaderDate(rawDateStr) {
       if (!rawDateStr) return '待核對';
       const parts = rawDateStr.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
@@ -306,18 +320,16 @@
       const dateObj = new Date(y, m, d);
       if (isNaN(dateObj.getTime())) return rawDateStr;
 
-      const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+      const realMonths = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
       const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thur', 'Fri', 'Sat'];
-      return `${d} ${months[m]} ${y}\n${days[dateObj.getDay()]}`;
+      return `${d} ${realMonths[m]} ${y}\n${days[dateObj.getDay()]}`;
     }
 
-    // Convert Surgeon full names e.g. "LAI, CHUN KIT" -> "Dr. Lai C K"
     function formatSurgeonName(rawName) {
       if (!rawName) return '';
       return rawName.split(/[\n;]/).map(line => {
         let clean = line.replace(/^Dr\.?\s*/i, '').trim();
         if (!clean) return '';
-        // Check "LASTNAME, FIRSTNAME OTHERNAME"
         if (clean.includes(',')) {
           const [last, first] = clean.split(',');
           const lastCap = last.trim().charAt(0).toUpperCase() + last.trim().slice(1).toLowerCase();
@@ -328,58 +340,7 @@
       }).filter(Boolean).join('\n');
     }
 
-    // Process Images with Gemini AI
-    btnProcess.addEventListener('click', async () => {
-      const apiKey = apiKeyInput.value.trim();
-      if (!apiKey) {
-        alert('請先輸入 Google Gemini API Key！');
-        apiKeyInput.focus();
-        return;
-      }
-      if (uploadedFiles.length === 0) return;
-
-      progressArea.classList.remove('hidden');
-      btnProcess.disabled = true;
-      btnClear.classList.add('hidden');
-
-      let allExtractedRows = [];
-
-      try {
-        for (let i = 0; i < uploadedFiles.length; i++) {
-          const file = uploadedFiles[i];
-          const pct = Math.round(((i) / uploadedFiles.length) * 100);
-          progressBar.style.width = `${pct}%`;
-          progressPercent.textContent = `${pct}%`;
-          progressText.textContent = `正在分析第 ${i + 1} / ${uploadedFiles.length} 張圖片 (${file.name})...`;
-
-          const base64Data = await resizeImage(file);
-          const rowsFromImage = await callGeminiVision(apiKey, base64Data);
-          allExtractedRows.push(...rowsFromImage);
-        }
-
-        progressBar.style.width = '100%';
-        progressPercent.textContent = '100%';
-        progressText.textContent = '分析完成，正在統整合併...';
-
-        consolidateAndRender(allExtractedRows);
-
-      } catch (err) {
-        console.error(err);
-        alert('分析失敗：' + (err.message || err));
-      } finally {
-        setTimeout(() => {
-          progressArea.classList.add('hidden');
-          btnProcess.disabled = false;
-          btnClear.classList.remove('hidden');
-        }, 800);
-      }
-    });
-
-    // Call Gemini 2.5 Flash with detailed system instruction
-    async function callGeminiVision(apiKey, base64Image) {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`;
-
-      const prompt = `
+    const SYSTEM_PROMPT = `
 你是一位香港醫院骨科 (O&T) 的專業手術排程秘書。請精確閱讀所附的手術室排程單（Operating Theatre Schedule），並按以下嚴格規則輸出 JSON 格式的陣列：
 
 1. 手術日期 (date):
@@ -401,8 +362,7 @@
    - 例如：Persona, Orthoalign CPS / Journey II Lantern / Actis Emphasys / Attune Velys / G7 + Taper Loc / CRMC / cementless / standby 等。不要自行推測未出現的器械。
 
 6. 醫生 (surgeon):
-   - 提取所有醫生姓名，保留原順序並換行。例如:
-     "LAI, CHUN KIT\\nNG, CHUN KIU\\nLO, CHEUK WING PHOEBE"
+   - 提取所有醫生姓名，保留原順序並換行。
 
 7. 備註 (remarks_whitelist):
    - 嚴格只提取以下白名單內容：
@@ -413,7 +373,7 @@
    - 排除 "PAC", "Non PAC", "SDS", "NDS", "Dexa", "1g cefazolin" 等任何其他雜項。
    - 如有器械運送手寫註記（例如 "CPS standby send on ___"、"send on 7/10"）請一併收錄。
 
-請只回傳合法的 JSON 陣列，不得包含 markdown 標籤以外的文字：
+請只回傳合法 JSON 陣列，不得包含 markdown 標籤以外的文字：
 [
   {
     "raw_date": "05/10/2026",
@@ -427,48 +387,146 @@
 ]
 `;
 
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+    // 香港免翻牆調度 OpenRouter (支援 Gemini 視覺模型)
+    async function callOpenRouter(apiKey, base64Image) {
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": window.location.origin,
+          "X-Title": "OT TJR Scheduler"
+        },
         body: JSON.stringify({
-          contents: [{
-            parts: [
-              { text: prompt },
-              { inline_data: { mime_type: "image/jpeg", data: base64Image } }
-            ]
-          }],
-          generationConfig: {
-            temperature: 0.1,
-            response_mime_type: "application/json"
-          }
+          model: "google/gemini-2.0-flash-001",
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: SYSTEM_PROMPT },
+                {
+                  type: "image_url",
+                  image_url: { url: `data:image/jpeg;base64,${base64Image}` }
+                }
+              ]
+            }
+          ]
         })
       });
 
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error?.message || `HTTP ${response.status}`);
+        throw new Error(errData.error?.message || `OpenRouter HTTP ${response.status}`);
       }
 
       const resJson = await response.json();
-      const text = resJson.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!text) return [];
-
-      try {
-        return JSON.parse(text);
-      } catch (e) {
-        console.error("JSON Parse Error:", text);
-        return [];
-      }
+      let text = resJson.choices?.[0]?.message?.content || "";
+      text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+      return JSON.parse(text);
     }
 
-    // Consolidation & Business Rules (Sales Time, Sorting, Grouping)
+    // Google 官方 API 調度 (需 VPN)
+    async function callGeminiDirect(apiKey, base64Image) {
+      const candidateModels = ['gemini-3.8-flash', 'gemini-3.6-flash'];
+      let lastError = null;
+
+      for (const model of candidateModels) {
+        try {
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{
+                parts: [
+                  { text: SYSTEM_PROMPT },
+                  { inline_data: { mime_type: "image/jpeg", data: base64Image } }
+                ]
+              }],
+              generationConfig: {
+                temperature: 0.1,
+                response_mime_type: "application/json"
+              }
+            })
+          });
+
+          if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            throw new Error(errData.error?.message || `HTTP ${response.status}`);
+          }
+
+          const resJson = await response.json();
+          const text = resJson.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (!text) return [];
+
+          return JSON.parse(text);
+        } catch (err) {
+          lastError = err;
+        }
+      }
+      throw lastError || new Error("無法連接 Google AI 辨識服務");
+    }
+
+    btnProcess.addEventListener('click', async () => {
+      const apiKey = apiKeyInput.value.trim();
+      const provider = providerSelect.value;
+
+      if (!apiKey) {
+        alert(provider === 'openrouter' ? '請先輸入 OpenRouter API Key！' : '請先輸入 Google Gemini API Key！');
+        apiKeyInput.focus();
+        return;
+      }
+      if (uploadedFiles.length === 0) return;
+
+      progressArea.classList.remove('hidden');
+      btnProcess.disabled = true;
+      btnClear.classList.add('hidden');
+
+      let allExtractedRows = [];
+
+      try {
+        for (let i = 0; i < uploadedFiles.length; i++) {
+          const file = uploadedFiles[i];
+          const pct = Math.round(((i) / uploadedFiles.length) * 100);
+          progressBar.style.width = `${pct}%`;
+          progressPercent.textContent = `${pct}%`;
+          progressText.textContent = `正在分析第 ${i + 1} / ${uploadedFiles.length} 張圖片 (${file.name})...`;
+
+          const base64Data = await resizeImage(file);
+          
+          let rowsFromImage = [];
+          if (provider === 'openrouter') {
+            rowsFromImage = await callOpenRouter(apiKey, base64Data);
+          } else {
+            rowsFromImage = await callGeminiDirect(apiKey, base64Data);
+          }
+          allExtractedRows.push(...rowsFromImage);
+        }
+
+        progressBar.style.width = '100%';
+        progressPercent.textContent = '100%';
+        progressText.textContent = '分析完成，正在統整合併...';
+
+        consolidateAndRender(allExtractedRows);
+
+      } catch (err) {
+        console.error(err);
+        alert('分析失敗：' + (err.message || err));
+      } finally {
+        setTimeout(() => {
+          progressArea.classList.add('hidden');
+          btnProcess.disabled = false;
+          btnClear.classList.remove('hidden');
+        }, 800);
+      }
+    });
+
     function consolidateAndRender(rawRows) {
       if (rawRows.length === 0) {
         alert('未能自圖片中辨識出有效的手術資料，請確認圖片清晰度。');
         return;
       }
 
-      // 1. Group by raw_date
       const groups = {};
       rawRows.forEach(row => {
         const d = row.raw_date || 'UNKNOWN';
@@ -476,7 +534,6 @@
         groups[d].push(row);
       });
 
-      // 2. Sort dates chronologically
       const sortedDates = Object.keys(groups).sort((a, b) => {
         if (a === 'UNKNOWN') return 1;
         if (b === 'UNKNOWN') return -1;
@@ -487,7 +544,6 @@
         return parseDate(a) - parseDate(b);
       });
 
-      // 3. Flatten and apply Sales time logic
       consolidatedData = [];
 
       sortedDates.forEach(dateKey => {
@@ -502,7 +558,6 @@
                               (r.diagnosis && r.diagnosis.toLowerCase().includes('bilateral'));
           if (idx === 0) firstCaseIsBilateral = isBilateral;
 
-          // Determine Sales Time
           let salesTime = '';
           if (!isUnknownDate) {
             if (idx === 0) salesTime = 'Sales @ 0900';
@@ -510,7 +565,6 @@
             else if (idx === 2) salesTime = 'Sales @ 1400';
           }
 
-          // Combine Remarks: Sales time + whitelisted items
           let remarksList = [];
           if (salesTime) remarksList.push(salesTime);
           if (r.whitelist_remarks && Array.isArray(r.whitelist_remarks)) {
@@ -519,7 +573,6 @@
             remarksList.push(r.whitelist_remarks);
           }
 
-          // Format Surgeon
           const formattedSurgeon = formatSurgeonName(r.surgeon);
 
           consolidatedData.push({
@@ -538,7 +591,6 @@
       renderTable();
     }
 
-    // Render HTML Table
     function renderTable() {
       tableBody.innerHTML = '';
       document.getElementById('displayStaff').textContent = staffNameInput.value || 'Lee On Yee';
@@ -551,8 +603,8 @@
         tr.innerHTML = `
           <td class="p-2 font-semibold text-center whitespace-pre-line align-top bg-slate-50/50" contenteditable="true" data-field="date" data-index="${i}">${row.date}</td>
           <td class="p-2 align-top" contenteditable="true" data-field="name" data-index="${i}">${row.name}</td>
-          <td class="p-2 align-top font-medium" contenteditable="true" data-field="diagnosis" data-index="${i}">${row.diagnosis}</td>
-          <td class="p-2 align-top font-medium" contenteditable="true" data-field="operation" data-index="${i}">${row.operation}</td>
+          <td class="p-2 align-top font-medium text-center" contenteditable="true" data-field="diagnosis" data-index="${i}">${row.diagnosis}</td>
+          <td class="p-2 align-top font-medium text-center" contenteditable="true" data-field="operation" data-index="${i}">${row.operation}</td>
           <td class="p-2 align-top whitespace-pre-line" contenteditable="true" data-field="instrument" data-index="${i}">${row.instrument}</td>
           <td class="p-2 align-top whitespace-pre-line text-slate-700" contenteditable="true" data-field="surgeon" data-index="${i}">${row.surgeon}</td>
           <td class="p-2 align-top whitespace-pre-line text-slate-700 font-mono text-[11px]" contenteditable="true" data-field="remarks" data-index="${i}">${row.remarks}</td>
@@ -561,7 +613,6 @@
         tableBody.appendChild(tr);
       });
 
-      // Synchronize in-table edits
       tableBody.querySelectorAll('[contenteditable="true"]').forEach(el => {
         el.addEventListener('blur', (e) => {
           const idx = e.target.dataset.index;
@@ -574,7 +625,6 @@
       resultSection.scrollIntoView({ behavior: 'smooth' });
     }
 
-    // Export Formatted Excel via ExcelJS (A4, Landscape, Fit 1 Page, 14pt Arial, Borders, Date Merging)
     btnExportExcel.addEventListener('click', async () => {
       if (consolidatedData.length === 0) return;
 
@@ -592,12 +642,10 @@
         }
       });
 
-      // Font style: 14pt Arial
       const fontRegular = { name: 'Arial', size: 14 };
       const fontBold = { name: 'Arial', size: 14, bold: true };
       const fontTitle = { name: 'Arial', size: 16, bold: true, underline: true };
 
-      // Thin border
       const thinBorder = {
         top: { style: 'thin', color: { argb: 'FF000000' } },
         left: { style: 'thin', color: { argb: 'FF000000' } },
@@ -605,7 +653,6 @@
         right: { style: 'thin', color: { argb: 'FF000000' } }
       };
 
-      // Header Row 1: Document Title & Metadata
       const staffVal = staffNameInput.value || 'Lee On Yee';
       const dateVal = meetingDateInput.value || '';
 
@@ -615,7 +662,6 @@
       sheet.getCell('E1').font = { name: 'Arial', size: 12, bold: true };
       sheet.getCell('G1').font = { name: 'Arial', size: 12, bold: true };
 
-      // Table Header Row 2
       const headers = ['Date', 'Name', 'Diagnosis', 'Operation', 'Inst. / Equipment', 'Surgeon', 'Message / Remarks'];
       const headerRow = sheet.addRow(headers);
       headerRow.height = 26;
@@ -630,7 +676,6 @@
         };
       });
 
-      // Data Rows
       const startRowIndex = 3;
       consolidatedData.forEach((item) => {
         const row = sheet.addRow([
@@ -643,7 +688,6 @@
           item.remarks
         ]);
 
-        // Auto estimate row height based on line breaks
         const lines = Math.max(
           (item.date.match(/\n/g) || []).length + 1,
           (item.instrument.match(/\n/g) || []).length + 1,
@@ -665,16 +709,14 @@
         });
       });
 
-      // Column widths (tuned for A4 Landscape)
-      sheet.getColumn(1).width = 14; // Date
-      sheet.getColumn(2).width = 25; // Name (~25 chars as requested)
-      sheet.getColumn(3).width = 14; // Diagnosis
-      sheet.getColumn(4).width = 14; // Operation
-      sheet.getColumn(5).width = 30; // Instrument
-      sheet.getColumn(6).width = 24; // Surgeon
-      sheet.getColumn(7).width = 40; // Message / Remarks (widened)
+      sheet.getColumn(1).width = 14; 
+      sheet.getColumn(2).width = 25; 
+      sheet.getColumn(3).width = 14; 
+      sheet.getColumn(4).width = 14; 
+      sheet.getColumn(5).width = 30; 
+      sheet.getColumn(6).width = 24; 
+      sheet.getColumn(7).width = 40; 
 
-      // Vertical Merge identical consecutive Date cells
       let mergeStart = startRowIndex;
       for (let r = startRowIndex; r <= sheet.rowCount; r++) {
         const currentVal = sheet.getCell(`A${r}`).value;
@@ -688,13 +730,11 @@
         }
       }
 
-      // Generate and Download .xlsx
       const buffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       saveAs(blob, `TJR_PreOp_Meeting_${dateVal.replace(/\//g, '-') || 'Schedule'}.xlsx`);
     });
 
-    // Export CSV (Plain text UTF-8 with BOM, excluding Sales row as requested)
     btnExportCSV.addEventListener('click', () => {
       if (consolidatedData.length === 0) return;
 
@@ -702,8 +742,6 @@
       const csvRows = [headers.join(',')];
 
       consolidatedData.forEach(row => {
-        // In CSV, remove the "Sales @" lines from Remarks as per rule:
-        // "CSV 與格式化 Excel 會分開處理，CSV 不會加入 Excel 專用的 Sales 行"
         const cleanRemarks = row.remarks
           .split('\n')
           .filter(line => !line.trim().startsWith('Sales @'))
@@ -726,24 +764,18 @@
       saveAs(blob, 'TJR_PreOp_List.csv');
     });
 
-    // Demo Data Button (Exact match with your uploaded schedules)
     btnDemo.addEventListener('click', () => {
       consolidateAndRender([
-        // 5 OCT 2026
         { raw_date: "05/10/2026", name: "待核對", diagnosis: "Right OA", operation: "Right TKR", instrument: "Persona, Orthoalign CPS", surgeon: "LAI, CHUN KIT\nNG, CHUN KIU\nLO, CHEUK WING PHOEBE", whitelist_remarks: ["Transamin IA", "LIA (Half ketorolac)", "CPS standby send on ___"] },
-        { raw_date: "05/10/2026", name: "待核對", diagnosis: "Left OA", operation: "Left TKR", instrument: "Journey II Lantern", surgeon: "LAI, CHUN KIT\nNG, CHUN KIU\nLO, CHEUK WING PHOEBE", whitelist_remarks: ["Transamin IA", "LIA (Half ketorolac)"] },
+        { raw_date: "05/10/2026", name: "待核對", diagnosis: "Left OA", operation: "Left TKR", instrument: "Journey II Lateran", surgeon: "LAI, CHUN KIT\nNG, CHUN KIU\nLO, CHEUK WING PHOEBE", whitelist_remarks: ["Transamin IA", "LIA (Half ketorolac)"] },
         { raw_date: "05/10/2026", name: "待核對", diagnosis: "Left OA", operation: "Left THR", instrument: "Persona, Orthoalign CPS", surgeon: "LAI, CHUN KIT\nNG, CHUN KIU\nLO, CHEUK WING PHOEBE", whitelist_remarks: ["Transamin IA", "LIA", "Antibiotics Cement"] },
-        // 6 OCT 2026
         { raw_date: "06/10/2026", name: "待核對", diagnosis: "Left OA", operation: "Left THR", instrument: "Actis Emphasys", surgeon: "LAW, WING KIN\nWONG, WAI YIP\nLO, CHEUK WING PHOEBE", whitelist_remarks: ["Transamin IA", "LIA", "T&S", "High offset stem send on 5/10"] },
         { raw_date: "06/10/2026", name: "待核對", diagnosis: "Left OA", operation: "Left UKR", instrument: "Journey II UKR", surgeon: "LAW, WING KIN\nWONG, WAI YIP\nLO, CHEUK WING PHOEBE", whitelist_remarks: ["Transamin IA", "LIA (No Ketorolac)", "UKR send on 5/10"] },
         { raw_date: "06/10/2026", name: "待核對", diagnosis: "Right OA", operation: "Right TKR", instrument: "Attune Velys", surgeon: "LAW, WING KIN\nWONG, WAI YIP\nLO, CHEUK WING PHOEBE", whitelist_remarks: ["Transamin IA", "LIA (Half Ketorolac)"] },
-        // 7 OCT 2026
-        { raw_date: "07/10/2026", name: "待核對", diagnosis: "Right OA", operation: "Right TKR", instrument: "Journey II Lantern", surgeon: "LI, HOK YIN ALWIN\nLO, CHEUK WING PHOEBE", whitelist_remarks: ["Transamin IA", "LIA (No Ketorolac)", "antibiotic cement"] },
+        { raw_date: "07/10/2026", name: "待核對", diagnosis: "Right OA", operation: "Right TKR", instrument: "Journey II Lateran", surgeon: "LI, HOK YIN ALWIN\nLO, CHEUK WING PHOEBE", whitelist_remarks: ["Transamin IA", "LIA (No Ketorolac)", "antibiotic cement"] },
         { raw_date: "07/10/2026", name: "待核對", diagnosis: "Left OA", operation: "Left TKR", instrument: "Persona, Orthoalign CPS", surgeon: "LI, HOK YIN ALWIN\nLO, CHEUK WING PHOEBE", whitelist_remarks: ["Transamin IA", "LIA (Full Ketorolac)", "Small size, inst and implant send on ___"] },
-        { raw_date: "07/10/2026", name: "待核對", diagnosis: "Left OA", operation: "Left TKR", instrument: "Journey II Lantern", surgeon: "LI, HOK YIN ALWIN\nLO, CHEUK WING PHOEBE\nWONG, WAI YIP", whitelist_remarks: ["Transamin IA", "LIA (Half Ketorolac)"] },
-        // 8 OCT 2026
+        { raw_date: "07/10/2026", name: "待核對", diagnosis: "Left OA", operation: "Left TKR", instrument: "Journey II Lateran", surgeon: "LI, HOK YIN ALWIN\nLO, CHEUK WING PHOEBE\nWONG, WAI YIP", whitelist_remarks: ["Transamin IA", "LIA (Half Ketorolac)"] },
         { raw_date: "08/10/2026", name: "待核對", diagnosis: "Right OA", operation: "Right TKR", instrument: "Persona CRMC Orthoalign", surgeon: "LAI, CHUN KIT\nLO, CHEUK WING PHOEBE", whitelist_remarks: ["Transamin IA", "LIA (No Ketorolac)", "Antibiotics Cement", "CRMC send on 7/10"] },
-        // 9 OCT 2026
         { raw_date: "09/10/2026", name: "待核對", diagnosis: "Right OA", operation: "Right THR", instrument: "G7 + Taper Loc", surgeon: "LAW, WING KIN\nLO, CHI KIN\nLO, CHEUK WING PHOEBE", whitelist_remarks: ["Transamin IA", "LIA", "T&S"] },
         { raw_date: "09/10/2026", name: "待核對", diagnosis: "Left OA", operation: "Left TKR", instrument: "Persona CRMC Orthoalign", surgeon: "LAW, WING KIN\nLO, CHI KIN\nLO, CHEUK WING PHOEBE", whitelist_remarks: ["Transamin IA", "LIA (Half Ketorolac)"] }
       ]);
