@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>O&T TJR 手術清單智能統整工具</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- ExcelJS & FileSaver for A4 Landscape Formatted Excel -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    .excel-table th, .excel-table td {
+      border: 1px solid #1f2937;
+    }
+  </style>
+</head>
+<body class="bg-slate-100 min-h-screen text-slate-800 font-sans">
+  <div class="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
+    
+    <!-- Header -->
+    <header class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 class="text-2xl font-bold text-slate-900 flex items-center gap-2">
+            <i data-lucide="clipboard-list" class="w-7 h-7 text-blue-600"></i>
+            O&T TJR Pre-operative Meeting 手術清單統整工具
+          </h1>
+          <p class="text-sm text-slate-500 mt-1">
+            支援多張手術單智能辨識、自動排程 Sales 時間、依規提取器械與 Remarks，並匯出符合 A4 單頁列印規格之 Excel。
+          </p>
+        </div>
+        <div class="flex items-center gap-3">
+          <button id="btnDemo" class="px-3 py-2 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition">
+            載入範例資料預覽
+          </button>
+        </div>
+      </div>
+      
+      <!-- API Key & Settings Bar -->
+      <div class="mt-4 pt-4 border-t border-slate-100 grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">
+            Gemini API Key <span class="text-red-500">*</span>
+            <a href="https://aistudio.google.com/app/apikey" target="_blank" class="text-blue-500 font-normal underline ml-1">免費取得</a>
+          </label>
+          <input type="password" id="apiKeyInput" placeholder="貼上 AI Studio API Key" class="w-full text-sm px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-slate-50" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">O.T. Staff 姓名</label>
+          <input type="text" id="staffNameInput" value="Lee On Yee" placeholder="例如：Lee On Yee" class="w-full text-sm px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">會議/製作日期</label>
+          <input type="text" id="meetingDateInput" value="" placeholder="例如：29/09/2026" class="w-full text-sm px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
+        </div>
+      </div>
+    </header>
+
+    <!-- Upload & Action Area -->
+    <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
+      <div id="dropZone" class="border-2 border-dashed border-slate-300 hover:border-blue-500 rounded-xl p-8 text-center cursor-pointer transition bg-slate-50 hover:bg-blue-50/30">
+        <input type="file" id="fileInput" multiple accept="image/jpeg,image/png,image/webp" class="hidden" />
+        <i data-lucide="upload-cloud" class="w-12 h-12 text-slate-400 mx-auto mb-3"></i>
+        <p class="text-base font-medium text-slate-700">點擊此處或拖曳手術單圖片至此</p>
+        <p class="text-xs text-slate-500 mt-1">支援 JPG、PNG、WEBP，每張上限 10MB，最多 20 張（依序處理）</p>
+      </div>
+
+      <!-- Image Previews -->
+      <div id="previewContainer" class="mt-4 flex flex-wrap gap-3 empty:hidden"></div>
+
+      <!-- Action Buttons -->
+      <div class="mt-6 flex flex-wrap items-center justify-between gap-4">
+        <div class="text-sm text-slate-500" id="fileStats">尚未選取任何圖片</div>
+        <div class="flex items-center gap-3">
+          <button id="btnClear" class="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition hidden">清空</button>
+          <button id="btnProcess" disabled class="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-medium text-sm rounded-lg shadow-sm transition flex items-center gap-2">
+            <i data-lucide="sparkles" class="w-4 h-4"></i>
+            <span>開始分析合併</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Processing Progress Bar -->
+      <div id="progressArea" class="mt-4 hidden">
+        <div class="flex justify-between text-xs text-slate-600 mb-1">
+          <span id="progressText">正在使用 AI 分析圖片...</span>
+          <span id="progressPercent">0%</span>
+        </div>
+        <div class="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
+          <div id="progressBar" class="bg-blue-600 h-2 rounded-full transition-all duration-300 w-0"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Results Section -->
+    <section id="resultSection" class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 hidden">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200 mb-4">
+        <div>
+          <h2 class="text-lg font-bold text-slate-900">整合預覽清單</h2>
+          <p class="text-xs text-slate-500">已自動按日期排序並加入 Sales 時間。點擊儲存格可直接手動修訂。</p>
+        </div>
+        <div class="flex items-center gap-3">
+          <button id="btnExportCSV" class="px-4 py-2 border border-slate-300 hover:bg-slate-50 text-slate-700 text-sm font-medium rounded-lg transition flex items-center gap-2">
+            <i data-lucide="file-text" class="w-4 h-4"></i>
+            匯出 CSV
+          </button>
+          <button id="btnExportExcel" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg shadow-sm transition flex items-center gap-2">
+            <i data-lucide="sheet" class="w-4 h-4"></i>
+            下載 A4 格式化 Excel (.xlsx)
+          </button>
+        </div>
+      </div>
+
+      <!-- Meeting Document Mock Header -->
+      <div class="flex justify-between items-end mb-2 px-1 text-sm font-bold text-slate-800">
+        <span class="text-base underline">O&T TJR Pre-operative Meeting</span>
+        <div class="space-x-6 text-xs">
+          <span>Name of O.T. Staff: <span id="displayStaff" class="font-normal underline"></span></span>
+          <span>Date: <span id="displayDate" class="font-normal underline"></span></span>
+        </div>
+      </div>
+
+      <!-- Consolidated Table -->
+      <div class="overflow-x-auto">
+        <table class="excel-table w-full text-xs text-left border-collapse border border-slate-800" id="consolidatedTable">
+          <thead class="bg-slate-100 font-bold text-slate-900 text-center">
+            <tr>
+              <th class="p-2 w-28">Date</th>
+              <th class="p-2 w-32">Name</th>
+              <th class="p-2 w-24">Diagnosis</th>
+              <th class="p-2 w-24">Operation</th>
+              <th class="p-2 w-48">Inst. / Equipment</th>
+              <th class="p-2 w-36">Surgeon</th>
+              <th class="p-2">Message / Remarks</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody" class="divide-y divide-slate-800">
+            <!-- Dynamically populated -->
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </div>
+
+  <script>
+    // Initialize Icons
+    lucide.createIcons();
+
+    // Default meeting date = today DD/MM/YYYY
+    const today = new Date();
+    document.getElementById('meetingDateInput').value = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth()+1).padStart(2, '0')}/${today.getFullYear()}`;
+
+    // DOM Elements
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const previewContainer = document.getElementById('previewContainer');
+    const fileStats = document.getElementById('fileStats');
+    const btnClear = document.getElementById('btnClear');
+    const btnProcess = document.getElementById('btnProcess');
+    const progressArea = document.getElementById('progressArea');
+    const progressBar = document.getElementById('progressBar');
+    const progressText = document.getElementById('progressText');
+    const progressPercent = document.getElementById('progressPercent');
+    const resultSection = document.getElementById('resultSection');
+    const tableBody = document.getElementById('tableBody');
+    const apiKeyInput = document.getElementById('apiKeyInput');
+    const staffNameInput = document.getElementById('staffNameInput');
+    const meetingDateInput = document.getElementById('meetingDateInput');
+    const btnExportExcel = document.getElementById('btnExportExcel');
+    const btnExportCSV = document.getElementById('btnExportCSV');
+    const btnDemo = document.getElementById('btnDemo');
+
+    // Load saved API Key from localStorage if present
+    if (localStorage.getItem('gemini_api_key')) {
+      apiKeyInput.value = localStorage.getItem('gemini_api_key');
+    }
+    apiKeyInput.addEventListener('change', () => {
+      localStorage.setItem('gemini_api_key', apiKeyInput.value.trim());
+    });
+
+    let uploadedFiles = [];
+    let consolidatedData = [];
+
+    // Drag and Drop
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('border-blue-500', 'bg-blue-50'); });
+    dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('border-blue-500', 'bg-blue-50'); });
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+      handleFiles(e.dataTransfer.files);
+    });
+    fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+
+    function handleFiles(files) {
+      const validTypes = ['image/jpeg', 'image/png', 'image/webp'];
+      for (const file of files) {
+        if (!validTypes.includes(file.type)) {
+          alert(`檔案 ${file.name} 格式不支援，僅支援 JPG/PNG/WEBP`);
+          continue;
+        }
+        if (file.size > 10 * 1024 * 1024) {
+          alert(`檔案 ${file.name} 超過 10MB 上限`);
+          continue;
+        }
+        if (uploadedFiles.length >= 20) {
+          alert('每批最多支援 20 張圖片');
+          break;
+        }
+        uploadedFiles.push(file);
+      }
+      renderPreviews();
+    }
+
+    function renderPreviews() {
+      previewContainer.innerHTML = '';
+      if (uploadedFiles.length === 0) {
+        fileStats.textContent = '尚未選取任何圖片';
+        btnClear.classList.add('hidden');
+        btnProcess.disabled = true;
+        return;
+      }
+
+      fileStats.textContent = `已加入 ${uploadedFiles.length} 張圖片（將依加入次序逐一辨識）`;
+      btnClear.classList.remove('hidden');
+      btnProcess.disabled = false;
+
+      uploadedFiles.forEach((file, index) => {
+        const div = document.createElement('div');
+        div.className = 'relative group w-20 h-24 border rounded-lg overflow-hidden bg-slate-100 flex flex-col items-center justify-center';
+        
+        const img = document.createElement('img');
+        img.src = URL.createObjectURL(file);
+        img.className = 'w-full h-full object-cover';
+        
+        const badge = document.createElement('span');
+        badge.className = 'absolute top-1 left-1 bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded font-mono';
+        badge.textContent = index + 1;
+
+        const delBtn = document.createElement('button');
+        delBtn.className = 'absolute top-1 right-1 bg-red-600 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition shadow';
+        delBtn.innerHTML = '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>';
+        delBtn.onclick = (e) => {
+          e.stopPropagation();
+          uploadedFiles.splice(index, 1);
+          renderPreviews();
+        };
+
+        div.appendChild(img);
+        div.appendChild(badge);
+        div.appendChild(delBtn);
+        previewContainer.appendChild(div);
+      });
+    }
+
+    btnClear.addEventListener('click', () => {
+      uploadedFiles = [];
+      renderPreviews();
+      resultSection.classList.add('hidden');
+    });
+
+    // Helper: Resize Image in Browser before Sending (Privacy + Fast Upload)
+    async function resizeImage(file, maxDimension = 2000) {
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const img = new Image();
+          img.onload = () => {
+            let width = img.width;
+            let height = img.height;
+            if (width > maxDimension || height > maxDimension) {
+              if (width > height) {
+                height = Math.round((height * maxDimension) / width);
+                width = maxDimension;
+              } else {
+                width = Math.round((width * maxDimension) / height);
+                height = maxDimension;
+              }
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, width, height);
+            const base64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+            resolve(base64);
+          };
+          img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    // Convert raw date string e.g. "05/10/2026" to "5 OCT 2026 Mon"
+    function formatHeaderDate(rawDateStr) {
+      if (!rawDateStr) return '待核對';
+      const parts = rawDateStr.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
+      if (!parts) return rawDateStr;
+      const d = parseInt(parts[1], 10);
+      const m = parseInt(parts[2], 10) - 1;
+      const y = parseInt(parts[3], 10);
+      const dateObj = new Date(y, m, d);
+      if (isNaN(dateObj.getTime())) return rawDateStr;
+
+      const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+      const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thur', 'Fri', 'Sat'];
+      return `${d} ${months[m]} ${y}\n${days[dateObj.getDay()]}`;
+    }
+
+    // Convert Surgeon full names e.g. "LAI, CHUN KIT" -> "Dr. Lai C K"
+    function formatSurgeonName(rawName) {
+      if (!rawName) return '';
+      return rawName.split(/[\n;]/).map(line => {
+        let clean = line.replace(/^Dr\.?\s*/i, '').trim();
+        if (!clean) return '';
+        // Check "LASTNAME, FIRSTNAME OTHERNAME"
+        if (clean.includes(',')) {
+          const [last, first] = clean.split(',');
+          const lastCap = last.trim().charAt(0).toUpperCase() + last.trim().slice(1).toLowerCase();
+          const initials = first.trim().split(/\s+/).map(p => p.charAt(0).toUpperCase()).join(' ');
+          return `Dr. ${lastCap} ${initials}`.trim();
+        }
+        return `Dr. ${clean}`;
+      }).filter(Boolean).join('\n');
+    }
+
+    // Process Images with Gemini AI
+    btnProcess.addEventListener('click', async () => {
+      const apiKey = apiKeyInput.value.trim();
+      if (!apiKey) {
+        alert('請先輸入 Google Gemini API Key！');
+        apiKeyInput.focus();
+        return;
+      }
+      if (uploadedFiles.length === 0) return;
+
+      progressArea.classList.remove('hidden');
+      btnProcess.disabled = true;
+      btnClear.classList.add('hidden');
+
+      let allExtractedRows = [];
+
+      try {
+        for (let i = 0; i < uploadedFiles.length; i++) {
+          const file = uploadedFiles[i];
+          const pct = Math.round(((i) / uploadedFiles.length) * 100);
+          progressBar.style.width = `${pct}%`;
+          progressPercent.textContent = `${pct}%`;
+          progressText.textContent = `正在分析第 ${i + 1} / ${uploadedFiles.length} 張圖片 (${file.name})...`;
+
+          const base64Data = await resizeImage(file);
+          const rowsFromImage = await callGeminiVision(apiKey, base64Data);
+          allExtractedRows.push(...rowsFromImage);
+        }
+
+        progressBar.style.width = '100%';
+        progressPercent.textContent = '100%';
+        progressText.textContent = '分析完成，正在統整合併...';
+
+        consolidateAndRender(allExtractedRows);
+
+      } catch (err) {
+        console.error(err);
+        alert('分析失敗：' + (err.message || err));
+      } finally {
+        setTimeout(() => {
+          progressArea.classList.add('hidden');
+          btnProcess.disabled = false;
+          btnClear.classList.remove('hidden');
+        }, 800);
+      }
+    });
+
+    // Call Gemini 2.5 Flash with detailed system instruction
+    async function callGeminiVision(apiKey, base64Image) {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`;
+
+      const prompt = `
+你是一位香港醫院骨科 (O&T) 的專業手術排程秘書。請精確閱讀所附的手術室排程單（Operating Theatre Schedule），並按以下嚴格規則輸出 JSON 格式的陣列：
+
+1. 手術日期 (date):
+   - 務必只讀取右上角標記的 "Date: DD/MM/YYYY"（例如 Date: 05/10/2026）。
+   - 絕對不要使用 Create dtm、列印時間、術前給藥時間 (如 5/10 9am) 等。
+   - 若無法識別，輸出 ""。
+
+2. 病人姓名 (name):
+   - 只保留清楚可見的英文姓名。若被遮擋、裁切或不存在，填寫 "待核對"。不要提取身分證或病歷號。
+
+3. 診斷 (diagnosis):
+   - 將 Osteoarthritis 或 OA Knee/Hip 統一簡寫為 "Right OA" 或 "Left OA"（如來源為 OA Knee (Right) 則填 "Right OA"；若為 OA Hip (Left) 填 "Left OA"）。若來源有 Bilateral 填 "Bilateral OA"。
+
+4. 手術 (operation):
+   - 保留左右側與標準縮寫，如 "Right TKR"、"Left TKR"、"Left THR"、"Left UKR"。不要展開全名。
+
+5. 器械/植入物 (instrument):
+   - 從 Remarks 或表格中提取明確的器械品牌、型號、尺寸及狀態備註，保留換行。
+   - 例如：Persona, Orthoalign CPS / Journey II Lantern / Actis Emphasys / Attune Velys / G7 + Taper Loc / CRMC / cementless / standby 等。不要自行推測未出現的器械。
+
+6. 醫生 (surgeon):
+   - 提取所有醫生姓名，保留原順序並換行。例如:
+     "LAI, CHUN KIT\\nNG, CHUN KIU\\nLO, CHEUK WING PHOEBE"
+
+7. 備註 (remarks_whitelist):
+   - 嚴格只提取以下白名單內容：
+     * "Transamin IA"
+     * "LIA (Half ketorolac)" 或 "LIA (No ketorolac)" 或 "LIA (Full ketorolac)" 或 "LIA"
+     * "Antibiotic cement" 或 "Antibiotics Cement"
+     * "T&S"
+   - 排除 "PAC", "Non PAC", "SDS", "NDS", "Dexa", "1g cefazolin" 等任何其他雜項。
+   - 如有器械運送手寫註記（例如 "CPS standby send on ___"、"send on 7/10"）請一併收錄。
+
+請只回傳合法的 JSON 陣列，不得包含 markdown 標籤以外的文字：
+[
+  {
+    "raw_date": "05/10/2026",
+    "name": "待核對",
+    "diagnosis": "Right OA",
+    "operation": "Right TKR",
+    "instrument": "Persona, Orthoalign CPS",
+    "surgeon": "Dr. Lai C K\\nDr. Ng C K\\nDr. Lo C W",
+    "whitelist_remarks": ["Transamin IA", "LIA (Half ketorolac)", "CPS standby send on ___"]
+  }
+]
+`;
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { text: prompt },
+              { inline_data: { mime_type: "image/jpeg", data: base64Image } }
+            ]
+          }],
+          generationConfig: {
+            temperature: 0.1,
+            response_mime_type: "application/json"
+          }
+        })
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error?.message || `HTTP ${response.status}`);
+      }
+
+      const resJson = await response.json();
+      const text = resJson.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) return [];
+
+      try {
+        return JSON.parse(text);
+      } catch (e) {
+        console.error("JSON Parse Error:", text);
+        return [];
+      }
+    }
+
+    // Consolidation & Business Rules (Sales Time, Sorting, Grouping)
+    function consolidateAndRender(rawRows) {
+      if (rawRows.length === 0) {
+        alert('未能自圖片中辨識出有效的手術資料，請確認圖片清晰度。');
+        return;
+      }
+
+      // 1. Group by raw_date
+      const groups = {};
+      rawRows.forEach(row => {
+        const d = row.raw_date || 'UNKNOWN';
+        if (!groups[d]) groups[d] = [];
+        groups[d].push(row);
+      });
+
+      // 2. Sort dates chronologically
+      const sortedDates = Object.keys(groups).sort((a, b) => {
+        if (a === 'UNKNOWN') return 1;
+        if (b === 'UNKNOWN') return -1;
+        const parseDate = s => {
+          const p = s.split(/[\/\-\.]/);
+          return new Date(p[2], p[1]-1, p[0]).getTime();
+        };
+        return parseDate(a) - parseDate(b);
+      });
+
+      // 3. Flatten and apply Sales time logic
+      consolidatedData = [];
+
+      sortedDates.forEach(dateKey => {
+        const rows = groups[dateKey];
+        const isUnknownDate = (dateKey === 'UNKNOWN');
+        const formattedDate = isUnknownDate ? '待核對' : formatHeaderDate(dateKey);
+
+        let firstCaseIsBilateral = false;
+
+        rows.forEach((r, idx) => {
+          const isBilateral = (r.operation && r.operation.toLowerCase().includes('bilateral')) || 
+                              (r.diagnosis && r.diagnosis.toLowerCase().includes('bilateral'));
+          if (idx === 0) firstCaseIsBilateral = isBilateral;
+
+          // Determine Sales Time
+          let salesTime = '';
+          if (!isUnknownDate) {
+            if (idx === 0) salesTime = 'Sales @ 0900';
+            else if (idx === 1) salesTime = firstCaseIsBilateral ? 'Sales @ 1300' : 'Sales @ 1100';
+            else if (idx === 2) salesTime = 'Sales @ 1400';
+          }
+
+          // Combine Remarks: Sales time + whitelisted items
+          let remarksList = [];
+          if (salesTime) remarksList.push(salesTime);
+          if (r.whitelist_remarks && Array.isArray(r.whitelist_remarks)) {
+            remarksList.push(...r.whitelist_remarks);
+          } else if (typeof r.whitelist_remarks === 'string') {
+            remarksList.push(r.whitelist_remarks);
+          }
+
+          // Format Surgeon
+          const formattedSurgeon = formatSurgeonName(r.surgeon);
+
+          consolidatedData.push({
+            date: formattedDate,
+            raw_date: dateKey,
+            name: r.name || '待核對',
+            diagnosis: r.diagnosis || '',
+            operation: r.operation || '',
+            instrument: r.instrument || '',
+            surgeon: formattedSurgeon,
+            remarks: remarksList.join('\n')
+          });
+        });
+      });
+
+      renderTable();
+    }
+
+    // Render HTML Table
+    function renderTable() {
+      tableBody.innerHTML = '';
+      document.getElementById('displayStaff').textContent = staffNameInput.value || 'Lee On Yee';
+      document.getElementById('displayDate').textContent = meetingDateInput.value || '';
+
+      consolidatedData.forEach((row, i) => {
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-slate-50 transition';
+
+        tr.innerHTML = `
+          <td class="p-2 font-semibold text-center whitespace-pre-line align-top bg-slate-50/50" contenteditable="true" data-field="date" data-index="${i}">${row.date}</td>
+          <td class="p-2 align-top" contenteditable="true" data-field="name" data-index="${i}">${row.name}</td>
+          <td class="p-2 align-top font-medium" contenteditable="true" data-field="diagnosis" data-index="${i}">${row.diagnosis}</td>
+          <td class="p-2 align-top font-medium" contenteditable="true" data-field="operation" data-index="${i}">${row.operation}</td>
+          <td class="p-2 align-top whitespace-pre-line" contenteditable="true" data-field="instrument" data-index="${i}">${row.instrument}</td>
+          <td class="p-2 align-top whitespace-pre-line text-slate-700" contenteditable="true" data-field="surgeon" data-index="${i}">${row.surgeon}</td>
+          <td class="p-2 align-top whitespace-pre-line text-slate-700 font-mono text-[11px]" contenteditable="true" data-field="remarks" data-index="${i}">${row.remarks}</td>
+        `;
+
+        tableBody.appendChild(tr);
+      });
+
+      // Synchronize in-table edits
+      tableBody.querySelectorAll('[contenteditable="true"]').forEach(el => {
+        el.addEventListener('blur', (e) => {
+          const idx = e.target.dataset.index;
+          const field = e.target.dataset.field;
+          consolidatedData[idx][field] = e.target.innerText.trim();
+        });
+      });
+
+      resultSection.classList.remove('hidden');
+      resultSection.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    // Export Formatted Excel via ExcelJS (A4, Landscape, Fit 1 Page, 14pt Arial, Borders, Date Merging)
+    btnExportExcel.addEventListener('click', async () => {
+      if (consolidatedData.length === 0) return;
+
+      const workbook = new ExcelJS.Workbook();
+      const sheet = workbook.addWorksheet('TJR Pre-op Meeting', {
+        pageSetup: {
+          paperSize: 9, // A4
+          orientation: 'landscape',
+          fitToPage: true,
+          fitToWidth: 1,
+          fitToHeight: 1,
+          margins: {
+            left: 0.3, right: 0.3, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2
+          }
+        }
+      });
+
+      // Font style: 14pt Arial
+      const fontRegular = { name: 'Arial', size: 14 };
+      const fontBold = { name: 'Arial', size: 14, bold: true };
+      const fontTitle = { name: 'Arial', size: 16, bold: true, underline: true };
+
+      // Thin border
+      const thinBorder = {
+        top: { style: 'thin', color: { argb: 'FF000000' } },
+        left: { style: 'thin', color: { argb: 'FF000000' } },
+        bottom: { style: 'thin', color: { argb: 'FF000000' } },
+        right: { style: 'thin', color: { argb: 'FF000000' } }
+      };
+
+      // Header Row 1: Document Title & Metadata
+      const staffVal = staffNameInput.value || 'Lee On Yee';
+      const dateVal = meetingDateInput.value || '';
+
+      sheet.addRow(['O&T TJR Pre-operative Meeting', '', '', '', `Name of O.T. Staff: ${staffVal}`, '', `Date: ${dateVal}`]);
+      sheet.getRow(1).height = 28;
+      sheet.getCell('A1').font = fontTitle;
+      sheet.getCell('E1').font = { name: 'Arial', size: 12, bold: true };
+      sheet.getCell('G1').font = { name: 'Arial', size: 12, bold: true };
+
+      // Table Header Row 2
+      const headers = ['Date', 'Name', 'Diagnosis', 'Operation', 'Inst. / Equipment', 'Surgeon', 'Message / Remarks'];
+      const headerRow = sheet.addRow(headers);
+      headerRow.height = 26;
+      headerRow.eachCell((cell) => {
+        cell.font = fontBold;
+        cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        cell.border = thinBorder;
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFF2F2F2' }
+        };
+      });
+
+      // Data Rows
+      const startRowIndex = 3;
+      consolidatedData.forEach((item) => {
+        const row = sheet.addRow([
+          item.date,
+          item.name,
+          item.diagnosis,
+          item.operation,
+          item.instrument,
+          item.surgeon,
+          item.remarks
+        ]);
+
+        // Auto estimate row height based on line breaks
+        const lines = Math.max(
+          (item.date.match(/\n/g) || []).length + 1,
+          (item.instrument.match(/\n/g) || []).length + 1,
+          (item.surgeon.match(/\n/g) || []).length + 1,
+          (item.remarks.match(/\n/g) || []).length + 1
+        );
+        row.height = Math.max(32, lines * 22);
+
+        row.eachCell((cell, colNumber) => {
+          cell.font = fontRegular;
+          cell.border = thinBorder;
+          if (colNumber === 1) {
+            cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+          } else if (colNumber === 3 || colNumber === 4) {
+            cell.alignment = { vertical: 'top', horizontal: 'center', wrapText: true };
+          } else {
+            cell.alignment = { vertical: 'top', horizontal: 'left', wrapText: true };
+          }
+        });
+      });
+
+      // Column widths (tuned for A4 Landscape)
+      sheet.getColumn(1).width = 14; // Date
+      sheet.getColumn(2).width = 25; // Name (~25 chars as requested)
+      sheet.getColumn(3).width = 14; // Diagnosis
+      sheet.getColumn(4).width = 14; // Operation
+      sheet.getColumn(5).width = 30; // Instrument
+      sheet.getColumn(6).width = 24; // Surgeon
+      sheet.getColumn(7).width = 40; // Message / Remarks (widened)
+
+      // Vertical Merge identical consecutive Date cells
+      let mergeStart = startRowIndex;
+      for (let r = startRowIndex; r <= sheet.rowCount; r++) {
+        const currentVal = sheet.getCell(`A${r}`).value;
+        const nextVal = (r < sheet.rowCount) ? sheet.getCell(`A${r + 1}`).value : null;
+
+        if (currentVal !== nextVal) {
+          if (mergeStart < r) {
+            sheet.mergeCells(`A${mergeStart}:A${r}`);
+          }
+          mergeStart = r + 1;
+        }
+      }
+
+      // Generate and Download .xlsx
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      saveAs(blob, `TJR_PreOp_Meeting_${dateVal.replace(/\//g, '-') || 'Schedule'}.xlsx`);
+    });
+
+    // Export CSV (Plain text UTF-8 with BOM, excluding Sales row as requested)
+    btnExportCSV.addEventListener('click', () => {
+      if (consolidatedData.length === 0) return;
+
+      const headers = ['Date', 'Name', 'Diagnosis', 'Operation', 'Inst. / Equipment', 'Surgeon', 'Remarks'];
+      const csvRows = [headers.join(',')];
+
+      consolidatedData.forEach(row => {
+        // In CSV, remove the "Sales @" lines from Remarks as per rule:
+        // "CSV 與格式化 Excel 會分開處理，CSV 不會加入 Excel 專用的 Sales 行"
+        const cleanRemarks = row.remarks
+          .split('\n')
+          .filter(line => !line.trim().startsWith('Sales @'))
+          .join('; ');
+
+        const escape = str => `"${(str || '').replace(/"/g, '""').replace(/\n/g, ' ')}"`;
+
+        csvRows.push([
+          escape(row.date),
+          escape(row.name),
+          escape(row.diagnosis),
+          escape(row.operation),
+          escape(row.instrument),
+          escape(row.surgeon),
+          escape(cleanRemarks)
+        ].join(','));
+      });
+
+      const blob = new Blob(['\uFEFF' + csvRows.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+      saveAs(blob, 'TJR_PreOp_List.csv');
+    });
+
+    // Demo Data Button (Exact match with your uploaded schedules)
+    btnDemo.addEventListener('click', () => {
+      consolidateAndRender([
+        // 5 OCT 2026
+        { raw_date: "05/10/2026", name: "待核對", diagnosis: "Right OA", operation: "Right TKR", instrument: "Persona, Orthoalign CPS", surgeon: "LAI, CHUN KIT\nNG, CHUN KIU\nLO, CHEUK WING PHOEBE", whitelist_remarks: ["Transamin IA", "LIA (Half ketorolac)", "CPS standby send on ___"] },
+        { raw_date: "05/10/2026", name: "待核對", diagnosis: "Left OA", operation: "Left TKR", instrument: "Journey II Lantern", surgeon: "LAI, CHUN KIT\nNG, CHUN KIU\nLO, CHEUK WING PHOEBE", whitelist_remarks: ["Transamin IA", "LIA (Half ketorolac)"] },
+        { raw_date: "05/10/2026", name: "待核對", diagnosis: "Left OA", operation: "Left THR", instrument: "Persona, Orthoalign CPS", surgeon: "LAI, CHUN KIT\nNG, CHUN KIU\nLO, CHEUK WING PHOEBE", whitelist_remarks: ["Transamin IA", "LIA", "Antibiotics Cement"] },
+        // 6 OCT 2026
+        { raw_date: "06/10/2026", name: "待核對", diagnosis: "Left OA", operation: "Left THR", instrument: "Actis Emphasys", surgeon: "LAW, WING KIN\nWONG, WAI YIP\nLO, CHEUK WING PHOEBE", whitelist_remarks: ["Transamin IA", "LIA", "T&S", "High offset stem send on 5/10"] },
+        { raw_date: "06/10/2026", name: "待核對", diagnosis: "Left OA", operation: "Left UKR", instrument: "Journey II UKR", surgeon: "LAW, WING KIN\nWONG, WAI YIP\nLO, CHEUK WING PHOEBE", whitelist_remarks: ["Transamin IA", "LIA (No Ketorolac)", "UKR send on 5/10"] },
+        { raw_date: "06/10/2026", name: "待核對", diagnosis: "Right OA", operation: "Right TKR", instrument: "Attune Velys", surgeon: "LAW, WING KIN\nWONG, WAI YIP\nLO, CHEUK WING PHOEBE", whitelist_remarks: ["Transamin IA", "LIA (Half Ketorolac)"] },
+        // 7 OCT 2026
+        { raw_date: "07/10/2026", name: "待核對", diagnosis: "Right OA", operation: "Right TKR", instrument: "Journey II Lantern", surgeon: "LI, HOK YIN ALWIN\nLO, CHEUK WING PHOEBE", whitelist_remarks: ["Transamin IA", "LIA (No Ketorolac)", "antibiotic cement"] },
+        { raw_date: "07/10/2026", name: "待核對", diagnosis: "Left OA", operation: "Left TKR", instrument: "Persona, Orthoalign CPS", surgeon: "LI, HOK YIN ALWIN\nLO, CHEUK WING PHOEBE", whitelist_remarks: ["Transamin IA", "LIA (Full Ketorolac)", "Small size, inst and implant send on ___"] },
+        { raw_date: "07/10/2026", name: "待核對", diagnosis: "Left OA", operation: "Left TKR", instrument: "Journey II Lantern", surgeon: "LI, HOK YIN ALWIN\nLO, CHEUK WING PHOEBE\nWONG, WAI YIP", whitelist_remarks: ["Transamin IA", "LIA (Half Ketorolac)"] },
+        // 8 OCT 2026
+        { raw_date: "08/10/2026", name: "待核對", diagnosis: "Right OA", operation: "Right TKR", instrument: "Persona CRMC Orthoalign", surgeon: "LAI, CHUN KIT\nLO, CHEUK WING PHOEBE", whitelist_remarks: ["Transamin IA", "LIA (No Ketorolac)", "Antibiotics Cement", "CRMC send on 7/10"] },
+        // 9 OCT 2026
+        { raw_date: "09/10/2026", name: "待核對", diagnosis: "Right OA", operation: "Right THR", instrument: "G7 + Taper Loc", surgeon: "LAW, WING KIN\nLO, CHI KIN\nLO, CHEUK WING PHOEBE", whitelist_remarks: ["Transamin IA", "LIA", "T&S"] },
+        { raw_date: "09/10/2026", name: "待核對", diagnosis: "Left OA", operation: "Left TKR", instrument: "Persona CRMC Orthoalign", surgeon: "LAW, WING KIN\nLO, CHI KIN\nLO, CHEUK WING PHOEBE", whitelist_remarks: ["Transamin IA", "LIA (Half Ketorolac)"] }
+      ]);
+    });
+  </script>
+</body>
+</html>
